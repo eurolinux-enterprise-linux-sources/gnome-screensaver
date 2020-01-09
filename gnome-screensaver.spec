@@ -15,7 +15,7 @@
 Summary: GNOME Screensaver
 Name: gnome-screensaver
 Version: 2.28.3
-Release: 18%{?dist}
+Release: 18%{?dist}.1
 License: GPLv2+
 Group: Amusements/Graphics
 Source0: http://download.gnome.org/sources/gnome-screensaver/2.28/%{name}-%{version}.tar.bz2
@@ -57,6 +57,9 @@ Patch18: fix-unlock-placement.patch
 
 # http://bugzilla.redhat.com/740892
 Patch19: fix-deadlock.patch
+
+# https://bugzilla.redhat.com/show_bug.cgi?id=759395
+Patch21: fix-lock-down.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 URL: http://www.gnome.org
@@ -117,6 +120,7 @@ simple, sane, secure defaults and be well integrated with the desktop.
 %patch17 -p1 -b .fix-bg-on-dock
 %patch18 -p1 -b .fix-unlock-placement
 %patch19 -p1 -b .fix-deadlock
+%patch21 -p1 -b .fix-lock-down
 
 libtoolize --force --copy
 
@@ -191,6 +195,10 @@ fi
 %doc %{_mandir}/man1/*.1.gz
 
 %changelog
+* Mon Oct 01 2012 Ray Strode <rstrode@redhat.com> 2.28.3-18.1
+- Desensitize toggle in preferences when lock down is enabled
+  Resolves: #860643
+
 * Wed Nov 09 2011 Ray Strode <rstrode@redhat.com> 2.28.3-18
 - Revert libxklavier workarounds introduced in -16 and -17
   They're causing additional problems.
