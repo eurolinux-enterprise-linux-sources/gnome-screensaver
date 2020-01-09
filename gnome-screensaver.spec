@@ -15,7 +15,7 @@
 Summary: GNOME Screensaver
 Name: gnome-screensaver
 Version: 2.28.3
-Release: 18%{?dist}.1
+Release: 24%{?dist}
 License: GPLv2+
 Group: Amusements/Graphics
 Source0: http://download.gnome.org/sources/gnome-screensaver/2.28/%{name}-%{version}.tar.bz2
@@ -57,6 +57,9 @@ Patch18: fix-unlock-placement.patch
 
 # http://bugzilla.redhat.com/740892
 Patch19: fix-deadlock.patch
+
+# http://bugzilla.redhat.com/648869
+Patch20: fix-fade-on-nvidia.patch
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=759395
 Patch21: fix-lock-down.patch
@@ -120,6 +123,7 @@ simple, sane, secure defaults and be well integrated with the desktop.
 %patch17 -p1 -b .fix-bg-on-dock
 %patch18 -p1 -b .fix-unlock-placement
 %patch19 -p1 -b .fix-deadlock
+%patch20 -p1 -b .fix-fade-on-nvidia
 %patch21 -p1 -b .fix-lock-down
 
 libtoolize --force --copy
@@ -195,9 +199,30 @@ fi
 %doc %{_mandir}/man1/*.1.gz
 
 %changelog
-* Mon Oct 01 2012 Ray Strode <rstrode@redhat.com> 2.28.3-18.1
+* Tue Dec 18 2012 Ray Strode <rstrode@redhat.com> 2.28.3-24
+- Fix long fade at lock time
+  Resolves: #848016
+
+* Thu Sep 27 2012 Ray Strode <rstrode@redhat.com> 2.28.3-23
+- Don't allow mouse to escape primary monitor
+  Resolves: #824752
+
+* Thu Sep 27 2012 Ray Strode <rstrode@redhat.com> 2.28.3-22
+- Don't show unlock dialog immediately after user locks
+  screen in some multimonitor scanarios
+  Resolves: #744763
+
+* Thu Sep 27 2012 Ray Strode <rstrode@redhat.com> 2.28.3-21
+- Fix sluggish unlock animation
+  Resolves: #752230
+
+* Wed Sep 26 2012 Ray Strode <rstrode@redhat.com> 2.28.3-20
 - Desensitize toggle in preferences when lock down is enabled
-  Resolves: #860643
+  Resolves: #759395
+
+* Tue Sep 25 2012 Ray Strode <rstrode@redhat.com> 2.28.3-19
+- Fix fade on nvidia
+  Resolves: #648869
 
 * Wed Nov 09 2011 Ray Strode <rstrode@redhat.com> 2.28.3-18
 - Revert libxklavier workarounds introduced in -16 and -17

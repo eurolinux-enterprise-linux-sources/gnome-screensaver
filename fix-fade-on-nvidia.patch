@@ -1,0 +1,99 @@
+Description: Fall back to XF86VM gamma fade if XRANDR gamma fade is not supported
+Author: Chris Coulson <chrisccoulson@ubuntu.com>
+Bug-Ubuntu: https://bugs.edge.launchpad.net/ubuntu/+source/gnome-screensaver/+bug/522806
+
+diff -Nur -x '*.orig' -x '*~' gnome-screensaver-2.29.90/src/gs-fade.c gnome-screensaver-2.29.90.new/src/gs-fade.c
+--- gnome-screensaver-2.29.90/src/gs-fade.c	2010-02-16 22:41:37.233254048 +0000
++++ gnome-screensaver-2.29.90.new/src/gs-fade.c	2010-02-16 22:52:43.700769263 +0000
+@@ -573,6 +573,10 @@
+         GdkDisplay *display = gdk_display_get_default ();
+         GdkScreen *screen = gdk_display_get_screen (display, screen_idx);
+         struct GSFadeScreenPrivate *screen_priv;
++        GnomeRRCrtc **crtcs;
++        GnomeRRCrtc *crtc;
++        gboolean res;
++        int gamma_size;
+ 
+         screen_priv = &fade->priv->screen_priv[screen_idx];
+ 
+@@ -585,6 +589,19 @@
+                 return;
+         }
+ 
++        crtcs = gnome_rr_screen_list_crtcs (screen_priv->rrscreen);
++
++        while (*crtcs)
++        {
++                crtc = *crtcs;
++                res = gnome_rr_crtc_get_gamma (crtc, &gamma_size, NULL, NULL, NULL);
++                if (res == FALSE || gamma_size == 0) {
++                        screen_priv->fade_type = FADE_TYPE_NONE;
++                        return;                
++                }
++                crtcs++;
++        }
++
+         screen_priv->fade_type = FADE_TYPE_XRANDR;
+         screen_priv->fade_setup = xrandr_fade_setup;
+         screen_priv->fade_finish = screen_fade_finish;
+
+From 7fcfd831a58a95b2da2284763c37720fa73e7de3 Mon Sep 17 00:00:00 2001
+From: Chris Coulson <chrisccoulson@googlemail.com>
+Date: Mon, 17 May 2010 21:53:41 +0100
+Subject: [PATCH] Don't crash when the XF86VM extension doesn't allow the gamma to be set
+
+On some systems where the XF86VM extension is present, the gamma value
+can be read successfully with XF86VidModeGetGamma but attempting to
+change the gamma value with XF86VidModeSetGamma will result in a
+BadValue error (eg, on KVM).
+
+Trap this error and abort the fade rather than crashing.
+
+Fixes https://bugzilla.gnome.org/show_bug.cgi?id=618932
+---
+ src/gs-fade.c |   12 +++++++++++-
+ 1 files changed, 11 insertions(+), 1 deletions(-)
+
+diff --git a/src/gs-fade.c b/src/gs-fade.c
+index 89ecb5d..6e6ba77 100644
+--- a/src/gs-fade.c
++++ b/src/gs-fade.c
+@@ -208,7 +208,12 @@ xf86_whack_gamma (int              screen,
+                         g2.blue = XF86_MIN_GAMMA;
+                 }
+ 
++                gdk_error_trap_push ();
+                 status = XF86VidModeSetGamma (GDK_DISPLAY (), screen, &g2);
++                if (gdk_error_trap_pop ()) {
++                        gs_debug ("Failed to set gamma. Bailing out and aborting fade");
++                        return FALSE;        
++                }
+         } else {
+ 
+ # ifdef HAVE_XF86VMODE_GAMMA_RAMP
+@@ -225,7 +230,12 @@ xf86_whack_gamma (int              screen,
+                         b[i] = gamma_info->b[i] * ratio;
+                 }
+ 
++                gdk_error_trap_push ();
+                 status = XF86VidModeSetGammaRamp (GDK_DISPLAY (), screen, gamma_info->size, r, g, b);
++                if (gdk_error_trap_pop ()) {
++                        gs_debug ("Failed to set gamma. Bailing out and aborting fade");
++                        return FALSE;                
++                }
+ 
+                 g_free (r);
+                 g_free (g);
+@@ -392,7 +402,7 @@ gamma_fade_set_alpha_gamma (GSFade *fade,
+         screen_priv = &fade->priv->screen_priv[screen_idx];
+         res = xf86_whack_gamma (screen_idx, screen_priv, alpha);
+ 
+-        return TRUE;
++        return res;
+ #else
+         return FALSE;
+ #endif /* HAVE_XF86VMODE_GAMMA */
+-- 
+1.7.0.4
+
+

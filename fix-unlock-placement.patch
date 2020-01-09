@@ -1,7 +1,7 @@
-From ccb37e3c8569604721ccb60bc18439887f153426 Mon Sep 17 00:00:00 2001
+From 36e1083fe36d9d2c8e09bb8f5b798664ad56769a Mon Sep 17 00:00:00 2001
 From: Ray Strode <rstrode@redhat.com>
 Date: Mon, 1 Aug 2011 17:16:55 -0400
-Subject: [PATCH 4/4] Make unlock dialog show up on primary monitor
+Subject: [PATCH 1/2] Make unlock dialog show up on primary monitor
 
 Right now the unlock dialog shows up whereever the pointer happens to be.
 This causes confusion for users when the pointer is near the middle
@@ -14,7 +14,7 @@ head, falling back to the first available connected head..
  1 files changed, 150 insertions(+), 2 deletions(-)
 
 diff --git a/src/gs-manager.c b/src/gs-manager.c
-index 8b035d7..ff9cb7b 100644
+index c2b4900..fbc7464 100644
 --- a/src/gs-manager.c
 +++ b/src/gs-manager.c
 @@ -31,6 +31,7 @@
@@ -25,7 +25,7 @@ index 8b035d7..ff9cb7b 100644
  
  #include "gs-prefs.h"        /* for GSSaverMode */
  
-@@ -1079,6 +1080,146 @@ window_deactivated_cb (GSWindow  *window,
+@@ -1080,6 +1081,146 @@ window_deactivated_cb (GSWindow  *window,
          g_idle_add ((GSourceFunc)window_deactivated_idle, manager);
  }
  
@@ -172,7 +172,7 @@ index 8b035d7..ff9cb7b 100644
  static GSWindow *
  find_window_at_pointer (GSManager *manager)
  {
-@@ -1881,8 +2022,15 @@ gs_manager_request_unlock (GSManager *manager)
+@@ -1882,8 +2023,15 @@ gs_manager_request_unlock (GSManager *manager)
                  return FALSE;
          }
  
@@ -190,6 +190,164 @@ index 8b035d7..ff9cb7b 100644
          gs_window_request_unlock (window);
  
          return TRUE;
+-- 
+1.7.1
+
+From d34240fb1790ab89014b1ab5fbdb109044225b1a Mon Sep 17 00:00:00 2001
+From: Ray Strode <rstrode@redhat.com>
+Date: Thu, 27 Sep 2012 20:56:00 -0400
+Subject: [PATCH] grab-x11: confine pointer to grab window
+
+We always show the unlock dialog on the primary monitor,
+so there's no reason to let the mouse wander off to other
+monitors.
+---
+ src/gs-grab-x11.c |   30 +++++++++++++++++++-----------
+ src/gs-grab.h     |    3 ++-
+ 2 files changed, 21 insertions(+), 12 deletions(-)
+
+diff --git a/src/gs-grab-x11.c b/src/gs-grab-x11.c
+index 40a3879..8b84e9d 100644
+--- a/src/gs-grab-x11.c
++++ b/src/gs-grab-x11.c
+@@ -50,6 +50,7 @@ static gpointer grab_object = NULL;
+ struct GSGrabPrivate
+ {
+         guint      mouse_hide_cursor : 1;
++        guint      mouse_confine_cursor : 1;
+         GdkWindow *mouse_grab_window;
+         GdkWindow *keyboard_grab_window;
+         GdkScreen *mouse_grab_screen;
+@@ -193,7 +194,8 @@ static int
+ gs_grab_get_mouse (GSGrab    *grab,
+                    GdkWindow *window,
+                    GdkScreen *screen,
+-                   gboolean   hide_cursor)
++                   gboolean   hide_cursor,
++                   gboolean   confine_cursor)
+ {
+         GdkGrabStatus status;
+         GdkCursor    *cursor;
+@@ -204,7 +206,8 @@ gs_grab_get_mouse (GSGrab    *grab,
+         cursor = get_cursor ();
+ 
+         gs_debug ("Grabbing mouse widget=%X", (guint32) GDK_WINDOW_XID (window));
+-        status = gdk_pointer_grab (window, TRUE, 0, NULL,
++        status = gdk_pointer_grab (window, TRUE, 0,
++                                   (confine_cursor ? window : NULL),
+                                    (hide_cursor ? cursor : NULL),
+                                    GDK_CURRENT_TIME);
+ 
+@@ -220,6 +223,7 @@ gs_grab_get_mouse (GSGrab    *grab,
+ 
+                 grab->priv->mouse_grab_screen = screen;
+                 grab->priv->mouse_hide_cursor = hide_cursor;
++                grab->priv->mouse_confine_cursor = confine_cursor;
+         }
+ 
+         gdk_cursor_unref (cursor);
+@@ -276,12 +280,14 @@ static gboolean
+ gs_grab_move_mouse (GSGrab    *grab,
+                     GdkWindow *window,
+                     GdkScreen *screen,
+-                    gboolean   hide_cursor)
++                    gboolean   hide_cursor,
++                    gboolean   confine_cursor)
+ {
+         gboolean   result;
+         GdkWindow *old_window;
+         GdkScreen *old_screen;
+         gboolean   old_hide_cursor;
++        gboolean   old_confine_cursor;
+ 
+         /* if the pointer is not grabbed and we have a
+            mouse_grab_window defined then we lost the grab */
+@@ -316,21 +322,22 @@ gs_grab_move_mouse (GSGrab    *grab,
+         old_window = grab->priv->mouse_grab_window;
+         old_screen = grab->priv->mouse_grab_screen;
+         old_hide_cursor = grab->priv->mouse_hide_cursor;
++        old_confine_cursor = grab->priv->mouse_confine_cursor;
+ 
+         if (old_window) {
+                 gs_grab_release_mouse (grab);
+         }
+ 
+-        result = gs_grab_get_mouse (grab, window, screen, hide_cursor);
++        result = gs_grab_get_mouse (grab, window, screen, hide_cursor, confine_cursor);
+ 
+         if (result != GDK_GRAB_SUCCESS) {
+                 sleep (1);
+-                result = gs_grab_get_mouse (grab, window, screen, hide_cursor);
++                result = gs_grab_get_mouse (grab, window, screen, hide_cursor, confine_cursor);
+         }
+ 
+         if ((result != GDK_GRAB_SUCCESS) && old_window) {
+                 gs_debug ("Could not grab mouse for new window.  Resuming previous grab.");
+-                gs_grab_get_mouse (grab, old_window, old_screen, old_hide_cursor);
++                gs_grab_get_mouse (grab, old_window, old_screen, old_hide_cursor, old_confine_cursor);
+         }
+ 
+         gs_debug ("*** releasing X server grab");
+@@ -431,7 +438,8 @@ gboolean
+ gs_grab_grab_window (GSGrab    *grab,
+                      GdkWindow *window,
+                      GdkScreen *screen,
+-                     gboolean   hide_cursor)
++                     gboolean   hide_cursor,
++                     gboolean   confine_cursor)
+ {
+         gboolean mstatus = FALSE;
+         gboolean kstatus = FALSE;
+@@ -460,7 +468,7 @@ gs_grab_grab_window (GSGrab    *grab,
+         }
+ 
+         for (i = 0; i < retries; i++) {
+-                mstatus = gs_grab_get_mouse (grab, window, screen, hide_cursor);
++                mstatus = gs_grab_get_mouse (grab, window, screen, hide_cursor, confine_cursor);
+                 if (mstatus == GDK_GRAB_SUCCESS) {
+                         break;
+                 }
+@@ -524,7 +532,7 @@ gs_grab_grab_root (GSGrab  *grab,
+         gdk_display_get_pointer (display, &screen, NULL, NULL, NULL);
+         root = gdk_screen_get_root_window (screen);
+ 
+-        res = gs_grab_grab_window (grab, root, screen, hide_cursor);
++        res = gs_grab_grab_window (grab, root, screen, hide_cursor, FALSE);
+ 
+         return res;
+ }
+@@ -540,7 +548,7 @@ gs_grab_grab_offscreen (GSGrab *grab,
+         gs_debug ("Grabbing an offscreen window");
+ 
+         screen = gtk_invisible_get_screen (GTK_INVISIBLE (grab->priv->invisible));
+-        res = gs_grab_grab_window (grab, grab->priv->invisible->window, screen, hide_cursor);
++        res = gs_grab_grab_window (grab, grab->priv->invisible->window, screen, hide_cursor, FALSE);
+ 
+         return res;
+ }
+@@ -564,7 +572,7 @@ gs_grab_move_to_window (GSGrab    *grab,
+         } while (!result);
+ 
+         do {
+-                result = gs_grab_move_mouse (grab, window, screen, hide_cursor);
++                result = gs_grab_move_mouse (grab, window, screen, hide_cursor, TRUE);
+                 gdk_flush ();
+         } while (!result);
+ }
+diff --git a/src/gs-grab.h b/src/gs-grab.h
+index 14fe0f9..08f67e5 100644
+--- a/src/gs-grab.h
++++ b/src/gs-grab.h
+@@ -59,7 +59,8 @@ gboolean  gs_grab_release_mouse    (GSGrab    *grab);
+ gboolean  gs_grab_grab_window      (GSGrab    *grab,
+                                     GdkWindow *window,
+                                     GdkScreen *screen,
+-                                    gboolean   hide_cursor);
++                                    gboolean   hide_cursor,
++                                    gboolean   confine_cursor);
+ 
+ gboolean  gs_grab_grab_root        (GSGrab    *grab,
+                                     gboolean   hide_cursor);
 -- 
 1.7.1
 
