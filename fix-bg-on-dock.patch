@@ -1,0 +1,183 @@
+From 6845051873558dfbebbcdfdff76650fa369d0b19 Mon Sep 17 00:00:00 2001
+From: Ray Strode <rstrode@redhat.com>
+Date: Mon, 31 Oct 2011 23:51:26 -0400
+Subject: [PATCH 1/3] gs-window-x11: make set_bg_pixmap work reliably
+
+The window isn't app-paintable, so setting back
+pixmap is ignored.
+
+Also, it's important to clear the window any
+time the back pixmap is changed otherwise the
+change won't take effect right away.
+---
+ src/gs-window-x11.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/src/gs-window-x11.c b/src/gs-window-x11.c
+index d7add63..7d42045 100644
+--- a/src/gs-window-x11.c
++++ b/src/gs-window-x11.c
+@@ -282,6 +282,8 @@ gs_window_set_background_pixmap (GSWindow  *window,
+                 gdk_window_set_back_pixmap (GTK_WIDGET (window)->window,
+                                             pixmap,
+                                             FALSE);
++                gdk_window_clear (GTK_WIDGET (window)->window);
++                gdk_display_sync (gtk_widget_get_display (GTK_WIDGET (window)));
+         }
+ }
+ 
+@@ -2375,6 +2377,7 @@ gs_window_new (GdkScreen *screen,
+                                "screen", screen,
+                                "monitor", monitor,
+                                "lock-enabled", lock_enabled,
++                               "app-paintable", TRUE,
+                                NULL);
+ 
+         return GS_WINDOW (result);
+-- 
+1.7.1
+
+
+From 02e24bffeaa97d56f76d489b1abdd23b7da19cec Mon Sep 17 00:00:00 2001
+From: Ray Strode <rstrode@redhat.com>
+Date: Fri, 29 Jul 2011 16:58:36 -0400
+Subject: [PATCH 2/3] manager: update background on windows when changed
+
+Update the user's background, when getting the signals
+to do so. This ensures the background is always updated
+when gnome-desktop tells us it needs to be updated, or
+when the monitor topology changes.
+---
+ src/gs-manager.c |   29 +++++++++++++++++++++++++++++
+ 1 files changed, 29 insertions(+), 0 deletions(-)
+
+diff --git a/src/gs-manager.c b/src/gs-manager.c
+index 050a39f..0222c52 100644
+--- a/src/gs-manager.c
++++ b/src/gs-manager.c
+@@ -46,6 +46,9 @@ static void gs_manager_class_init (GSManagerClass *klass);
+ static void gs_manager_init       (GSManager      *manager);
+ static void gs_manager_finalize   (GObject        *object);
+ 
++static void apply_background_to_window (GSManager *manager,
++                                        GSWindow  *window);
++
+ #define GS_MANAGER_GET_PRIVATE(o) (G_TYPE_INSTANCE_GET_PRIVATE ((o), GS_TYPE_MANAGER, GSManagerPrivate))
+ 
+ struct GSManagerPrivate
+@@ -942,11 +945,19 @@ gs_manager_class_init (GSManagerClass *klass)
+         g_type_class_add_private (klass, sizeof (GSManagerPrivate));
+ }
+ 
++
+ static void
+ on_bg_changed (GnomeBG   *bg,
+                GSManager *manager)
+ {
++        GSList     *l;
++
+         gs_debug ("background changed");
++
++        for (l = manager->priv->windows; l; l = l->next) {
++                GSWindow *win = GS_WINDOW (l->data);
++                apply_background_to_window (manager, win);
++        }
+ }
+ 
+ static void
+@@ -1148,6 +1159,21 @@ window_grab_broken_cb (GSWindow           *window,
+         }
+ }
+ 
++static void
++window_size_changed_cb (GtkWidget         *widget,
++                        GdkRectangle      *allocation,
++                        GSManager         *manager)
++{
++        GSWindow *window = GS_WINDOW (widget);
++
++        if (! GTK_WIDGET_REALIZED (widget) || ! GTK_WIDGET_VISIBLE (window)) {
++                return;
++        }
++
++        gs_debug ("Handling window allocate signal");
++        apply_background_to_window (manager, window);
++}
++
+ static gboolean
+ unfade_idle (GSManager *manager)
+ {
+@@ -1403,6 +1429,7 @@ disconnect_window_signals (GSManager *manager,
+         g_signal_handlers_disconnect_by_func (window, window_dialog_up_changed_cb, manager);
+         g_signal_handlers_disconnect_by_func (window, window_unmap_cb, manager);
+         g_signal_handlers_disconnect_by_func (window, window_grab_broken_cb, manager);
++        g_signal_handlers_disconnect_by_func (window, window_size_changed_cb, manager);
+ }
+ 
+ static void
+@@ -1436,6 +1463,8 @@ connect_window_signals (GSManager *manager,
+                                  G_CALLBACK (window_unmap_cb), manager, G_CONNECT_AFTER);
+         g_signal_connect_object (window, "grab_broken_event",
+                                  G_CALLBACK (window_grab_broken_cb), manager, G_CONNECT_AFTER);
++        g_signal_connect_object (window, "size-allocate",
++                                 G_CALLBACK (window_size_changed_cb), manager, G_CONNECT_AFTER);
+ }
+ 
+ static void
+-- 
+1.7.1
+
+
+From f690a6e09d0a89bed3adb971e4395fa4eb5fd2e9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Martin=20Schm=C3=B6lzer?= <mschmoelzer@gmail.com>
+Date: Mon, 1 Aug 2011 13:29:22 -0400
+Subject: [PATCH 3/3] correct background scaling in multiple monitor setups
+
+The apply_background_to_window() function in gs-manager.c
+scales the background image to the entire screen, not the
+monitor which displays the unlock dialog.
+
+This commit changes that function to call
+gdk_screen_get_monitor_geometry() instead of
+gdk_screen_get_width() and gdk_screen_get_height().
+
+http://bugzilla.gnome.org/show_bug.cgi?id=648193
+---
+ src/gs-manager.c |   12 +++++++++---
+ 1 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/gs-manager.c b/src/gs-manager.c
+index 0222c52..c2b4900 100644
+--- a/src/gs-manager.c
++++ b/src/gs-manager.c
+@@ -1225,6 +1225,9 @@ apply_background_to_window (GSManager *manager,
+ {
+         GdkPixmap       *pixmap;
+         GdkScreen       *screen;
++        GdkWindow       *gdk_window;
++        gint             monitor;
++        GdkRectangle     monitor_geometry;
+         int              width;
+         int              height;
+ 
+@@ -1234,11 +1237,14 @@ apply_background_to_window (GSManager *manager,
+         }
+ 
+         screen = gs_window_get_screen (window);
+-        width = gdk_screen_get_width (screen);
+-        height = gdk_screen_get_height (screen);
++        gdk_window = gs_window_get_gdk_window (window);
++        monitor = gdk_screen_get_monitor_at_window (screen, gdk_window);
++        gdk_screen_get_monitor_geometry (screen, monitor, &monitor_geometry);
++        width = monitor_geometry.width;
++        height = monitor_geometry.height;
+         gs_debug ("Creating pixmap background w:%d h:%d", width, height);
+         pixmap = gnome_bg_create_pixmap (manager->priv->bg,
+-                                         gs_window_get_gdk_window (window),
++                                         gdk_window,
+                                          width,
+                                          height,
+                                          FALSE);
+-- 
+1.7.1
+

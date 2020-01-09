@@ -1,0 +1,195 @@
+From ccb37e3c8569604721ccb60bc18439887f153426 Mon Sep 17 00:00:00 2001
+From: Ray Strode <rstrode@redhat.com>
+Date: Mon, 1 Aug 2011 17:16:55 -0400
+Subject: [PATCH 4/4] Make unlock dialog show up on primary monitor
+
+Right now the unlock dialog shows up whereever the pointer happens to be.
+This causes confusion for users when the pointer is near the middle
+of a dual head setup.
+
+This commit changes the code to try to show the monitor on the primary
+head, falling back to the first available connected head..
+---
+ src/gs-manager.c |  152 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 files changed, 150 insertions(+), 2 deletions(-)
+
+diff --git a/src/gs-manager.c b/src/gs-manager.c
+index 8b035d7..ff9cb7b 100644
+--- a/src/gs-manager.c
++++ b/src/gs-manager.c
+@@ -31,6 +31,7 @@
+ 
+ #define GNOME_DESKTOP_USE_UNSTABLE_API
+ #include <libgnomeui/gnome-bg.h>
++#include <libgnomeui/gnome-rr.h>
+ 
+ #include "gs-prefs.h"        /* for GSSaverMode */
+ 
+@@ -1079,6 +1080,146 @@ window_deactivated_cb (GSWindow  *window,
+         g_idle_add ((GSourceFunc)window_deactivated_idle, manager);
+ }
+ 
++static int
++find_monitor_for_output (GSManager     *manager,
++                         GdkScreen     *screen,
++                         GnomeRROutput *output)
++{
++        int x, y;
++        guint width, height;
++        GnomeRRMode *mode;
++        int monitor;
++
++        mode = gnome_rr_output_get_current_mode (output);
++        gnome_rr_output_get_position (output, &x, &y);
++
++        width = gnome_rr_mode_get_width (mode);
++        height = gnome_rr_mode_get_height (mode);
++
++        monitor = gdk_screen_get_monitor_at_point (screen, x + width / 4, y + height / 4);
++
++        return monitor;
++}
++
++static int
++find_usable_monitor (GSManager  *manager,
++                      GdkScreen **screen)
++{
++        GdkDisplay     *display;
++        GnomeRRScreen  *rrscreen;
++        GnomeRROutput **outputs;
++        int i, first_connected;
++        int monitor;
++
++        display = gdk_display_get_default ();
++        gdk_display_get_pointer (display, screen, NULL, NULL, NULL);
++
++        rrscreen = gnome_rr_screen_new (*screen, NULL, NULL, NULL);
++        if (rrscreen == NULL) {
++                gs_debug ("picking monitor 0 because xrandr failed to work right");
++                return 0;
++        }
++
++        first_connected = -1;
++        monitor = -1;
++        outputs = gnome_rr_screen_list_outputs (rrscreen);
++        for (i = 0; outputs[i] != NULL && monitor < 0; i++) {
++                if (!gnome_rr_output_is_connected (outputs[i])) {
++                        continue;
++                }
++
++                if (gnome_rr_output_get_is_primary (outputs[i])) {
++                        monitor = find_monitor_for_output (manager,
++                                                           *screen,
++                                                           outputs[i]);
++                        gs_debug ("picking monitor %d because it's the primary one", monitor);
++                } else if (first_connected < 0) {
++                        first_connected = i;
++                }
++        }
++        if (monitor < 0 && first_connected >= 0) {
++                monitor = find_monitor_for_output (manager,
++                                                   *screen,
++                                                   outputs[first_connected]);
++                gs_debug ("picking monitor %d because it's the first connected one", monitor);
++        }
++        gnome_rr_screen_destroy (rrscreen);
++
++        return monitor;
++}
++
++static void
++move_pointer_to_window (GSWindow  *window)
++{
++        GdkDisplay *display;
++        GdkScreen  *window_screen;
++        int         window_x, window_y, window_width, window_height;
++        GdkScreen  *pointer_screen;
++        int         pointer_x, pointer_y;
++
++        display = gtk_widget_get_display (GTK_WIDGET (window));
++        window_screen = gtk_widget_get_screen (GTK_WIDGET (window));
++        gdk_window_get_geometry (GTK_WIDGET (window)->window,
++                                 &window_x,
++                                 &window_y,
++                                 &window_width,
++                                 &window_height,
++                                 NULL);
++
++        gdk_display_get_pointer (display,
++                                 &pointer_screen,
++                                 &pointer_x,
++                                 &pointer_y,
++                                 NULL);
++        if (pointer_screen == window_screen &&
++            pointer_x >= window_x + .1 * window_width &&
++            pointer_x < window_x + .9 * window_width &&
++            pointer_y >= window_y + .1 * window_height &&
++            pointer_y < window_y + .9 * window_height) {
++                gs_debug ("pointer at %d,%d which is within %d,%d (%dx%d)", pointer_x, pointer_y, window_x, window_y, window_width, window_height);
++                return;
++        }
++        gs_debug ("Warping pointer to %d,%d", window_x + window_width / 4, window_y + window_height / 4);
++        gdk_display_warp_pointer (display,
++                                  gtk_widget_get_screen (GTK_WIDGET (window)),
++                                  window_x + window_width / 4,
++                                  window_y + window_height / 4);
++
++}
++
++static GSWindow *
++find_window_at_usable_monitor (GSManager *manager)
++{
++        GdkScreen  *screen;
++        int         monitor;
++        GSWindow   *window;
++        int         screen_num;
++        GSList     *l;
++
++        monitor = find_usable_monitor (manager, &screen);
++        screen_num = gdk_screen_get_number (screen);
++
++        /* Find the gs-window that is on that screen */
++        window = NULL;
++        for (l = manager->priv->windows; l; l = l->next) {
++                GSWindow *win = GS_WINDOW (l->data);
++                if (gs_window_get_screen (win) == screen
++                    && gs_window_get_monitor (win) == monitor) {
++                        window = win;
++                }
++        }
++
++        if (window == NULL) {
++                gs_debug ("WARNING: Could not find the GSWindow for screen %d", screen_num);
++                /* take the first one */
++                window = manager->priv->windows->data;
++        } else {
++                gs_debug ("Requesting unlock for screen %d", screen_num);
++        }
++
++        return window;
++}
++
+ static GSWindow *
+ find_window_at_pointer (GSManager *manager)
+ {
+@@ -1881,8 +2022,15 @@ gs_manager_request_unlock (GSManager *manager)
+                 return FALSE;
+         }
+ 
+-        /* Find the GSWindow that contains the pointer */
+-        window = find_window_at_pointer (manager);
++        /* Find the GSWindow that belongs to primary monitor */
++        window = find_window_at_usable_monitor (manager);
++
++        /* Make sure it's visible */
++        gtk_widget_show (GTK_WIDGET (window));
++
++        /* Move the pointer to it */
++        move_pointer_to_window (window);
++
+         gs_window_request_unlock (window);
+ 
+         return TRUE;
+-- 
+1.7.1
+
