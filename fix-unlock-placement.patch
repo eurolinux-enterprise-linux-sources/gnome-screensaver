@@ -1,4 +1,4 @@
-From 36e1083fe36d9d2c8e09bb8f5b798664ad56769a Mon Sep 17 00:00:00 2001
+From 3fcdc236f25a6bb3746c3a01d75b474ca5a1dd9e Mon Sep 17 00:00:00 2001
 From: Ray Strode <rstrode@redhat.com>
 Date: Mon, 1 Aug 2011 17:16:55 -0400
 Subject: [PATCH 1/2] Make unlock dialog show up on primary monitor
@@ -10,11 +10,11 @@ of a dual head setup.
 This commit changes the code to try to show the monitor on the primary
 head, falling back to the first available connected head..
 ---
- src/gs-manager.c |  152 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
- 1 files changed, 150 insertions(+), 2 deletions(-)
+ src/gs-manager.c |  158 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 files changed, 156 insertions(+), 2 deletions(-)
 
 diff --git a/src/gs-manager.c b/src/gs-manager.c
-index c2b4900..fbc7464 100644
+index 1da8952..f54ff92 100644
 --- a/src/gs-manager.c
 +++ b/src/gs-manager.c
 @@ -31,6 +31,7 @@
@@ -25,7 +25,7 @@ index c2b4900..fbc7464 100644
  
  #include "gs-prefs.h"        /* for GSSaverMode */
  
-@@ -1080,6 +1081,146 @@ window_deactivated_cb (GSWindow  *window,
+@@ -1084,6 +1085,152 @@ window_deactivated_cb (GSWindow  *window,
          g_idle_add ((GSourceFunc)window_deactivated_idle, manager);
  }
  
@@ -57,6 +57,7 @@ index c2b4900..fbc7464 100644
 +        GdkDisplay     *display;
 +        GnomeRRScreen  *rrscreen;
 +        GnomeRROutput **outputs;
++        GError *error = NULL;
 +        int i, first_connected;
 +        int monitor;
 +
@@ -67,6 +68,11 @@ index c2b4900..fbc7464 100644
 +        if (rrscreen == NULL) {
 +                gs_debug ("picking monitor 0 because xrandr failed to work right");
 +                return 0;
++        }
++
++        if (!gnome_rr_screen_refresh (rrscreen, &error) && error != NULL) {
++                gs_debug ("could not refresh screen", error->message);
++                g_error_free (error);
 +        }
 +
 +        first_connected = -1;
@@ -172,7 +178,7 @@ index c2b4900..fbc7464 100644
  static GSWindow *
  find_window_at_pointer (GSManager *manager)
  {
-@@ -1882,8 +2023,15 @@ gs_manager_request_unlock (GSManager *manager)
+@@ -1889,8 +2036,15 @@ gs_manager_request_unlock (GSManager *manager)
                  return FALSE;
          }
  
@@ -193,10 +199,11 @@ index c2b4900..fbc7464 100644
 -- 
 1.7.1
 
-From d34240fb1790ab89014b1ab5fbdb109044225b1a Mon Sep 17 00:00:00 2001
+
+From 3a585dd818dc3783146b47b628824ca117576536 Mon Sep 17 00:00:00 2001
 From: Ray Strode <rstrode@redhat.com>
 Date: Thu, 27 Sep 2012 20:56:00 -0400
-Subject: [PATCH] grab-x11: confine pointer to grab window
+Subject: [PATCH 2/2] grab-x11: confine pointer to grab window
 
 We always show the unlock dialog on the primary monitor,
 so there's no reason to let the mouse wander off to other
@@ -207,7 +214,7 @@ monitors.
  2 files changed, 21 insertions(+), 12 deletions(-)
 
 diff --git a/src/gs-grab-x11.c b/src/gs-grab-x11.c
-index 40a3879..8b84e9d 100644
+index 40a3879..63b308b 100644
 --- a/src/gs-grab-x11.c
 +++ b/src/gs-grab-x11.c
 @@ -50,6 +50,7 @@ static gpointer grab_object = NULL;

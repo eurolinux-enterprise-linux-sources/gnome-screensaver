@@ -15,7 +15,7 @@
 Summary: GNOME Screensaver
 Name: gnome-screensaver
 Version: 2.28.3
-Release: 24%{?dist}.1
+Release: 28%{?dist}
 License: GPLv2+
 Group: Amusements/Graphics
 Source0: http://download.gnome.org/sources/gnome-screensaver/2.28/%{name}-%{version}.tar.bz2
@@ -64,7 +64,7 @@ Patch20: fix-fade-on-nvidia.patch
 # https://bugzilla.redhat.com/show_bug.cgi?id=759395
 Patch21: fix-lock-down.patch
 
-# https://bugzilla.redhat.com/show_bug.cgi?id=994868
+# https://bugzilla.redhat.com/show_bug.cgi?id=905935
 Patch22: move-not-nuke.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
@@ -203,11 +203,25 @@ fi
 %doc %{_mandir}/man1/*.1.gz
 
 %changelog
-* Thu Aug 15 2013 Ray Strode <rstrode@redhat.com> 2.28.3-24.1
+* Mon Aug 19 2013 Ray Strode <rstrode@redhat.com> 2.28.3-28
+- Fix crasher introduced in previous commit
+  Related: #923425
+  Resolves: 998448
+
+* Fri Aug 09 2013 Ray Strode <rstrode@redhat.com> 2.28.3-27
+- Fix critical messages on monitor hotplug
+  Resolves: #923425
+
+* Thu Aug 08 2013 Ray Strode <rstrode@redhat.com> 2.28.3-26
+- Fix up fix-fade-on-nvidia patch from -19 to properly
+  handle X servers that don't support setting gamma ramp.
+  Resolves: #947671
+
+* Tue Feb 05 2013 Ray Strode <rstrode@redhat.com> 2.28.3-25
 - When trying to acquire a contentious keyboard grab, don't
   nuke input focus, but instead move it to new grab window
   before taking grab.
-  Resolves: #994868
+  Resolves: #905935
 
 * Tue Dec 18 2012 Ray Strode <rstrode@redhat.com> 2.28.3-24
 - Fix long fade at lock time
